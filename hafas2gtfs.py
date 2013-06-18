@@ -15,6 +15,7 @@ Options:
 """
 import os
 from datetime import datetime
+from collections import defaultdict
 
 import unicodecsv
 from pyproj import Proj
@@ -35,17 +36,6 @@ def convert_gk(x, y):
     lon, lat = projector_gk(x, y, inverse=True)
     return lon, lat
 
-
-GTFS_FILES = (
-    'agency.txt',
-    'calendar.txt',
-    'calendar_dates.txt',
-    'routes.txt',
-    'shapes.txt',
-    'stop_times.txt',
-    'stops.txt',
-    'trips.txt',
-)
 
 GTFS_FILES = {
     'agency.txt': ('agency_id', 'agency_name', 'agency_url', 'agency_timezone', 'agency_lang', 'agency_phone'),
@@ -97,6 +87,7 @@ class Hafas2GTFS(object):
         self.mapping = mapping
         self.route_counter = 0
         self.routes = {}
+        self.stops = defaultdict(dict)
 
     def make_gtfs_files(self):
         self.files = {}
@@ -118,7 +109,9 @@ class Hafas2GTFS(object):
     def create(self):
         self.make_gtfs_files()
         self.service_id = self.parse_eckdaten()
-        self.parse_bitfield()
+        self.parse_bfkoord()
+        self.parse_bahnhof()
+        self.parse_bitfeld()
         self.agency_id = self.write_agency()
         self.parse_fplan()
 
@@ -194,20 +187,24 @@ class Hafas2GTFS(object):
         return ':'.join(time)
 
     def write_stop(self, stop_line):
-        lat, lon = convert_gk(0, 0)
+        stop_id = stop_line['stop_id']
+        stop_data = self.stops[stop_id]
+        if stop_data.get('done', False):
+            return stop_id
         self.files['stops.txt'].writerow({
-            'stop_id': stop_line['stop_id'],
-            'stop_code': stop_line['stop_id'],
-            'stop_name': stop_line['stop_name'],
+            'stop_id': stop_id,
+            'stop_code': stop_id,
+            'stop_name': stop_data['name'],
             'stop_desc': '',
-            'stop_lat': str(lat),
-            'stop_lon': str(lon),
+            'stop_lat': str(stop_data['lat']),
+            'stop_lon': str(stop_data['lon']),
             'zone_id': None,
             'stop_url': '',
             'location_type': '0',  # FIXME
             'parent_station': None
         })
-        return stop_line['stop_id']
+        stop_data['done'] = True
+        return stop_id
 
     def write_stop_time(self, trip_id, stop_sequence, stop_line):
         stop_id = self.write_stop(stop_line)
@@ -239,15 +236,45 @@ class Hafas2GTFS(object):
         end = datetime.strptime(data[1], '%d.%m.%Y')
         return self.write_service(start, end)
 
-    def parse_bitfield(self):
+    def parse_bitfeld(self):
         self.services = {}
-        for line in file(self.get_path(self.get_name('bitfield'))):
+        for line in file(self.get_path(self.get_name('bitfeld'))):
+            line = line.decode('latin1')
             service_id = int(line[:6])
             # "For technical reasons 2 bits are inserted directly
             # before the first day of the start of the timetable period
             # and two bits directly after the last day at the end of the
             # timetable period."
             self.services[service_id] = Bits(hex=line[6:])[2:]
+
+    def parse_bfkoord(self):
+        for line in file(self.get_path(self.get_name('bfkoord'))):
+            line = line.decode('latin1')
+            """
+0000001 2567526.00 5644934.00 KÖLN                     Heumarkt
+            """
+            stop_id = int(line[:7].strip())
+            x = float(line[8:18].strip())
+            y = float(line[19:29].strip())
+            lat, lon = convert_gk(x, y)
+            self.stops[stop_id].update({
+                'lat': lat,
+                'lon': lon
+            })
+
+    def parse_bahnhof(self):
+        for line in file(self.get_path(self.get_name('bahnhof'))):
+            line = line.decode('latin1')
+            """
+0000001 VRS Köln Heumarkt
+            """
+            stop_id = int(line[:7].strip())
+            trans_authority = line[8:11]
+            name = line[12:].strip()
+            self.stops[stop_id].update({
+                'name': name,
+                'authority': trans_authority
+            })
 
     def parse_fplan(self):
         state = 'meta'
