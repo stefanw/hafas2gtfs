@@ -3,38 +3,25 @@
 Hafas2GTFS
 
 Usage:
-  hafas2gtfs.py <input_dir> <output_dir> [--mapping=<mp>]
+  hafas2gtfs.py <input_dir> <output_dir> [--mapping=<mp>] [--projection=<proj>]
   hafas2gtfs.py -h | --help
   hafas2gtfs.py --version
 
 Options:
-  -h --help       Show this screen.
-  --version       Show version.
-  --mapping=<mp>  Map filenames
+  -h --help            Show this screen.
+  --version            Show version.
+  --mapping=<mp>       Map standard filenames to others in k:v,k:v format
+  --projection=<proj>  If coordinates use projection, give projection string
 
 """
 import os
+import errno
 from datetime import datetime, timedelta
 from collections import defaultdict
 
 import unicodecsv
-from pyproj import Proj
 from bitstring import Bits
-
-
-projector_utm = Proj(proj='utm', zone=32, ellps='WGS84')
-projector_gk = Proj(proj='tmerc', ellps='bessel', lon_0='9d0E',
-    lat_0='0', x_0='500000')
-
-
-def convert_utm(x, y):
-    lon, lat = projector_utm(x, y, inverse=True)
-    return lon, lat
-
-
-def convert_gk(x, y):
-    lon, lat = projector_gk(x, y, inverse=True)
-    return lon, lat
+from pyproj import Proj
 
 
 GTFS_FILES = {
@@ -80,12 +67,67 @@ ROUTE_TYPES = {
     'VAL': 0
 }
 
+projector_utm = Proj(
+    proj='utm',
+    zone=32,
+    ellps='WGS84'
+)
+
+projector_gk_cologne = Proj(
+    proj='tmerc',
+    lat_0=0,
+    lon_0=6,
+    k=1,
+    x_0=2500000,
+    y_0=0,
+    ellps='bessel',
+    towgs84='582,105,414,1.04,0.35,-3.08,8.3',
+    units='m'
+)
+
+
+def convert_utm(x, y):
+    """ UTM2LatLon """
+    lon, lat = projector_utm(x, y, inverse=True)
+    return lat, lon
+
+
+def convert_gk_cologne(x, y):
+    """ GK2LatLon """
+    lon, lat = projector_gk_cologne(x, y, inverse=True)
+    return lat, lon
+
+
+PROJECTIONS = {
+    'utm': convert_utm,
+    'gk_cologne': convert_gk_cologne
+}
+
+
+def get_projector(name):
+    if name is None:
+        return lambda x, y: (y, x)
+    if name in PROJECTIONS:
+        return PROJECTIONS[name]
+    return Proj(name)
+
+
+def mkdir_p(path):
+    try:
+        os.makedirs(path)
+    except OSError as exc:
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
+
 
 class Hafas2GTFS(object):
-    def __init__(self, hafas_dir, out_dir, mapping=None):
+    def __init__(self, hafas_dir, out_dir, mapping=None, projection=None):
         self.hafas_dir = hafas_dir
         self.out_dir = out_dir
         self.mapping = mapping
+        self.projector = get_projector(projection)
         self.route_counter = 0
         self.routes = {}
         self.stops = defaultdict(dict)
@@ -108,6 +150,7 @@ class Hafas2GTFS(object):
         return self.mapping.get(name, name)
 
     def create(self):
+        mkdir_p(self.out_dir)
         self.make_gtfs_files()
 
         self.parse_eckdaten()
@@ -279,6 +322,7 @@ class Hafas2GTFS(object):
             self.services[service_id] = Bits(hex=line[6:])[2:2 + day_range]
 
     def parse_bfkoord(self):
+
         for line in file(self.get_path(self.get_name('bfkoord'))):
             line = line.decode('latin1')
             """
@@ -287,7 +331,7 @@ class Hafas2GTFS(object):
             stop_id = int(line[:7].strip())
             x = float(line[8:18].strip())
             y = float(line[19:29].strip())
-            lat, lon = convert_gk(x, y)
+            lat, lon = self.projector(x, y)
             self.stops[stop_id].update({
                 'lat': lat,
                 'lon': lon
@@ -396,6 +440,7 @@ def main(hafas_dir, out_dir, options=None):
     if options.get('--mapping'):
         config['mapping'] = dict([o.split(':') for o in options.get(
                                  '--mapping').split(',')])
+    config['projection'] = options.get('--projection')
     h2g = Hafas2GTFS(hafas_dir, out_dir, **config)
     h2g.create()
 
