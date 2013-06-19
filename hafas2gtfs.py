@@ -237,18 +237,19 @@ class Hafas2GTFS(object):
         return route_id
 
     def write_trip(self, route_id, meta):
+        trip_id = '%s_%s' % (meta['service_number'], meta['administration'])
         service_id = str(meta.get('bitfield_number', 0))
         self.files['trips.txt'].writerow({
             'route_id': route_id,
             'service_id': service_id,
-            'trip_id': meta['service_number'],
+            'trip_id': trip_id,
             'trip_headsign': '',
             'trip_short_name': '',
             'direction_id': meta.get('direction', '0'),
             'block_id': '',
             'shape_id': ''
         })
-        return meta['service_number']
+        return trip_id
 
     def get_gtfs_time(self, time):
         if time is None:
