@@ -193,7 +193,8 @@ class Hafas2GTFS(object):
         })
         return route_id
 
-    def write_trip(self, route_id, service_id, meta):
+    def write_trip(self, route_id, meta):
+        service_id = str(meta.get('bitfield_number', 0))
         self.files['trips.txt'].writerow({
             'route_id': route_id,
             'service_id': service_id,
@@ -322,8 +323,7 @@ class Hafas2GTFS(object):
                 if not state == 'data':
                     stop_sequence = 0
                     route_id = self.write_route(meta)
-                    service_id = '1'
-                    trip_id = self.write_trip(route_id, service_id, meta)
+                    trip_id = self.write_trip(route_id, meta)
                     state = 'data'
                 stop_sequence += 1
                 stop_line_info = self.parse_schedule(line)
@@ -366,7 +366,13 @@ class Hafas2GTFS(object):
         }
 
     def parse_fplan_meta_A(self, line):
-        # discern A und A VE
+        attribute_code = line[3:5]
+        if attribute_code == 'VE':
+            return {
+                'start_index': line[6:13],
+                'end_index': line[14:21],
+                'bitfield_number': int(line[22:28]),
+            }
         return {}
 
     def parse_fplan_meta_I(self, line):
