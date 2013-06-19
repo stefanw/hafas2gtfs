@@ -170,8 +170,8 @@ class Hafas2GTFS(object):
         self.files['agency.txt'].writerow({
             'agency_id': self.agency_id,
             'agency_name': 'Agency Name',
-            'agency_url': '',
-            'agency_timezone': '',
+            'agency_url': 'http://example.com',
+            'agency_timezone': 'Europe/Amsterdam',
             'agency_lang': '',
             'agency_phone': ''
         })
@@ -227,7 +227,7 @@ class Hafas2GTFS(object):
             'route_id': route_id,
             'agency_id': self.agency_id,
             'route_short_name': route_id,
-            'route_long_name': route_id,
+            'route_long_name': None,
             'route_desc': '',
             'route_type': str(ROUTE_TYPES.get(meta['mean_of_transport'], 0)),
             'route_url': '',
