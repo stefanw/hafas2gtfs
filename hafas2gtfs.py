@@ -428,8 +428,13 @@ class Hafas2GTFS(object):
         }
 
     def parse_fplan_meta_R(self, line):
+        direction = line[3:4].strip()
+        if not direction or direction == '0':
+            direction = '0'
+        else:
+            direction = '1'
         return {
-            'direction': line[3:4].strip()
+            'direction': direction
         }
 
 
