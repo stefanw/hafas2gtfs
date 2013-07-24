@@ -18,11 +18,14 @@ import os
 import errno
 from datetime import datetime, timedelta
 from collections import defaultdict
+import logging
 
 import unicodecsv
 from bitstring import Bits
 from pyproj import Proj
 
+logger = logging.getLogger('hafas2gtfs')
+logger.addHandler(logging.StreamHandler())
 
 GTFS_FILES = {
     'agency.txt': ('agency_id', 'agency_name', 'agency_url', 'agency_timezone', 'agency_lang', 'agency_phone'),
@@ -130,6 +133,7 @@ class Hafas2GTFS(object):
         self.projector = get_projector(projection)
         self.route_counter = 0
         self.routes = {}
+        self.trips = set()
         self.stops = defaultdict(dict)
 
     def make_gtfs_files(self):
@@ -238,6 +242,9 @@ class Hafas2GTFS(object):
 
     def write_trip(self, route_id, meta):
         trip_id = '%s_%s' % (meta['service_number'], meta['administration'])
+        if trip_id in self.trips:
+            return False
+        self.trips.add(trip_id)
         service_id = str(meta.get('bitfield_number', 0))
         self.files['trips.txt'].writerow({
             'route_id': route_id,
@@ -283,7 +290,14 @@ class Hafas2GTFS(object):
         stop_data['done'] = True
         return stop_id
 
-    def write_stop_time(self, trip_id, stop_sequence, stop_line):
+    def write_stop_times(self, stop_times):
+        if not stop_times:
+            return
+        length = len(stop_times)
+        for i, (trip_id, stop_sequence, stop_line_info) in enumerate(stop_times):
+            self.write_stop_time(trip_id, stop_sequence, length, stop_line_info)
+
+    def write_stop_time(self, trip_id, stop_sequence, length, stop_line):
         stop_id = self.write_stop(stop_line)
 
         arrival_time = self.get_gtfs_time(stop_line['arrival_time'])
@@ -293,6 +307,12 @@ class Hafas2GTFS(object):
             arrival_time = departure_time
         elif not departure_time and arrival_time:
             departure_time = arrival_time
+
+        if ((stop_sequence == 1 or stop_sequence == length)
+                and not departure_time and not arrival_time):
+            logger.warning('Stop_time left out! Trip %s has no arrival/departure time at critical sequence %d', trip_id, stop_sequence)
+            # Can't interpolate for first/last stop_time, leave out
+            return
 
         self.files['stop_times.txt'].writerow({
             'trip_id': trip_id,
@@ -348,7 +368,7 @@ class Hafas2GTFS(object):
             """
             stop_id = int(line[:7].strip())
             trans_authority = line[8:11]
-            name = line[12:].strip()
+            name = line[12:].strip().split('$')[0]
             self.stops[stop_id].update({
                 'name': name,
                 'authority': trans_authority
@@ -357,12 +377,19 @@ class Hafas2GTFS(object):
     def parse_fplan(self):
         state = 'meta'
         meta = {}
-        for line in file(self.get_path(self.get_name('fplan'))):
+        stop_times = []
+        filename = self.get_path(self.get_name('fplan'))
+        line_count = float(file(filename).read().count('\n'))
+        for count, line in enumerate(file(filename)):
+            if count % 20000 == 0:
+                logger.info('\r%f%%', (count / line_count * 100.0))
             line = line.decode('latin1')
             if line.startswith('%'):
                 continue
             if line.startswith('*'):
                 if not state == 'meta':
+                    self.write_stop_times(stop_times)
+                    stop_times = []
                     meta = {}
                 state = 'meta'
                 meta.update(self.parse_fplan_meta(line))
@@ -372,9 +399,14 @@ class Hafas2GTFS(object):
                     route_id = self.write_route(meta)
                     trip_id = self.write_trip(route_id, meta)
                     state = 'data'
+                if trip_id is False:
+                    # duplicate trip?
+                    continue
                 stop_sequence += 1
                 stop_line_info = self.parse_schedule(line)
-                self.write_stop_time(trip_id, stop_sequence, stop_line_info)
+                stop_times.append((trip_id, stop_sequence, stop_line_info))
+
+        self.write_stop_times(stop_times)
 
     def parse_schedule(self, line):
         """
