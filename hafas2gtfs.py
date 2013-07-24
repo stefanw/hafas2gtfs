@@ -399,9 +399,9 @@ class Hafas2GTFS(object):
     def parse_fplan_meta_Z(self, line):
         return {
             'service_number': int(line[3:8]),
-            'administration': line[9:15],
-            'number_intervals': line[22:25],
-            'time_offset': line[26:29]
+            'administration': line[9:15].strip(),
+            'number_intervals': line[22:25].strip(),
+            'time_offset': line[26:29].strip()
         }
 
     def parse_fplan_meta_G(self, line):
