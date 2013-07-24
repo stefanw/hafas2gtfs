@@ -258,6 +258,9 @@ class Hafas2GTFS(object):
         if len(time) == 2:
             time = time + ['00']
         time = [str(t).zfill(2) for t in time]
+        for t in time:
+            if t == '99':
+                return ''
         return ':'.join(time)
 
     def write_stop(self, stop_line):
