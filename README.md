@@ -1,5 +1,6 @@
 # Hafas2GTFS Converter
 
+**This is no longer maintained, [here is an updated fork](https://github.com/geops/hafas2gtfs).**
 
 ## Examples
 
